@@ -545,6 +545,20 @@ export async function runMigrationsPg(adapter: BunSqlAdapter): Promise<void> {
 		ON CONFLICT (family) DO NOTHING
 	`);
 
+	// Ensure usage_snapshots table exists (for upgrades from pre-usage-history installs)
+	await adapter.unsafe(`
+		CREATE TABLE IF NOT EXISTS usage_snapshots (
+			account_id TEXT NOT NULL,
+			timestamp BIGINT NOT NULL,
+			window_key TEXT NOT NULL,
+			utilization DOUBLE PRECISION NOT NULL,
+			resets_at BIGINT
+		)
+	`);
+	await adapter.unsafe(
+		`CREATE INDEX IF NOT EXISTS idx_usage_snapshots_acct_win_time ON usage_snapshots(account_id, window_key, timestamp DESC)`,
+	);
+
 	// Rename oauth_sessions.mode 'max' → 'claude-oauth'
 	try {
 		await adapter.unsafe(
