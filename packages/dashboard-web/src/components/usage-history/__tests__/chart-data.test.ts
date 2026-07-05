@@ -7,6 +7,19 @@ import {
 } from "../chart-data";
 
 const H = 60 * 60 * 1000;
+const NOW = 3 * H;
+
+/** Build a single-window series with an inline prediction, for annotation tests. */
+function annSeries(
+	window: string,
+	prediction: UsageHistoryWindowSeries["prediction"],
+): UsageHistoryWindowSeries {
+	return {
+		window,
+		points: [{ t: 1000, utilization: 50, resetsAt: prediction.resetsAtMs }],
+		prediction,
+	};
+}
 
 function series(): UsageHistoryWindowSeries[] {
 	return [
@@ -91,6 +104,39 @@ describe("resetMarkers", () => {
 	it("returns one deduped marker per distinct resetsAt", () => {
 		expect(resetMarkers(series()).map((m) => m.x)).toEqual([5 * H]);
 	});
+
+	it("sorts distinct out-of-order resets ascending", () => {
+		const windows: UsageHistoryWindowSeries[] = [
+			{
+				window: "seven_day",
+				points: [{ t: 0, utilization: 40, resetsAt: 10 * H }],
+				prediction: {
+					slopePerHour: 0,
+					etaExhaustMs: null,
+					predictedAtReset: null,
+					resetsAtMs: 10 * H,
+					willExhaustBeforeReset: false,
+					state: "stable",
+					lowConfidence: false,
+				},
+			},
+			{
+				window: "five_hour",
+				points: [{ t: 0, utilization: 20, resetsAt: 3 * H }],
+				prediction: {
+					slopePerHour: 0,
+					etaExhaustMs: null,
+					predictedAtReset: null,
+					resetsAtMs: 3 * H,
+					willExhaustBeforeReset: false,
+					state: "stable",
+					lowConfidence: false,
+				},
+			},
+		];
+		// windows are given largest-reset-first; markers must come back ascending
+		expect(resetMarkers(windows).map((m) => m.x)).toEqual([3 * H, 10 * H]);
+	});
 });
 
 describe("formatPredictionAnnotation", () => {
@@ -103,5 +149,91 @@ describe("formatPredictionAnnotation", () => {
 		expect(formatPredictionAnnotation(series()[1], 0).toLowerCase()).toContain(
 			"stable",
 		);
+	});
+
+	// Load-bearing guard: a rising window with NO known reset must never claim
+	// "safe until reset" (Fable M6). Pins the negative direction.
+	it("never claims safe for a rising window with no known reset", () => {
+		const out = formatPredictionAnnotation(
+			annSeries("five_hour", {
+				slopePerHour: 5,
+				etaExhaustMs: null,
+				predictedAtReset: null,
+				resetsAtMs: null,
+				willExhaustBeforeReset: false,
+				state: "rising",
+				lowConfidence: false,
+			}),
+			NOW,
+		);
+		expect(out.toLowerCase()).not.toContain("safe");
+		expect(out).toContain("five_hour");
+		expect(out.toLowerCase()).toContain("rising");
+	});
+
+	it("says collecting for insufficient_data", () => {
+		const out = formatPredictionAnnotation(
+			annSeries("seven_day", {
+				slopePerHour: 0,
+				etaExhaustMs: null,
+				predictedAtReset: null,
+				resetsAtMs: null,
+				willExhaustBeforeReset: false,
+				state: "insufficient_data",
+				lowConfidence: false,
+			}),
+			NOW,
+		);
+		expect(out.toLowerCase()).toContain("collecting");
+	});
+
+	it("says at limit for an exhausted window", () => {
+		const out = formatPredictionAnnotation(
+			annSeries("five_hour", {
+				slopePerHour: 20,
+				etaExhaustMs: NOW,
+				predictedAtReset: 100,
+				resetsAtMs: 5 * H,
+				willExhaustBeforeReset: true,
+				state: "exhausted",
+				lowConfidence: false,
+			}),
+			NOW,
+		);
+		expect(out.toLowerCase()).toContain("limit");
+	});
+
+	it("flags low confidence for a rising low-confidence window", () => {
+		const out = formatPredictionAnnotation(
+			annSeries("five_hour", {
+				slopePerHour: 8,
+				etaExhaustMs: null,
+				predictedAtReset: null,
+				resetsAtMs: 5 * H,
+				willExhaustBeforeReset: false,
+				state: "rising",
+				lowConfidence: true,
+			}),
+			NOW,
+		);
+		expect(out.toLowerCase()).toContain("low confidence");
+	});
+
+	// Positive counterpart to the guard: a rising window WITH a known reset that
+	// won't exhaust before it should say "safe". Together these pin both directions.
+	it("says safe until reset for a rising window with a known reset", () => {
+		const out = formatPredictionAnnotation(
+			annSeries("five_hour", {
+				slopePerHour: 6,
+				etaExhaustMs: 8 * H,
+				predictedAtReset: 70,
+				resetsAtMs: 5 * H,
+				willExhaustBeforeReset: false,
+				state: "rising",
+				lowConfidence: false,
+			}),
+			NOW,
+		);
+		expect(out.toLowerCase()).toContain("safe");
 	});
 });
