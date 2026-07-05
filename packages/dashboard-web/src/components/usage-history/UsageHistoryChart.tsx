@@ -50,18 +50,31 @@ export function UsageHistoryChart({ windows, loading, height = 400 }: Props) {
 	// Numeric time axis with a domain extended to cover future reset markers and
 	// forecast endpoints — otherwise recharts (category axis / data-bounded domain)
 	// drops them entirely (Fable H1). Y headroom keeps overage (>100%) visible (L6).
-	const xs = [...rows.map((r) => r.t), ...markers.map((m) => m.x)];
-	const xDomain: [number, number] = xs.length
-		? [Math.min(...xs), Math.max(...xs)]
-		: [0, 1];
-	const yMax = Math.max(
-		100,
-		...rows.flatMap((r) =>
-			[...windowKeys, ...predictionKeys]
-				.map((k) => r[k])
-				.filter((v): v is number => typeof v === "number"),
-		),
-	);
+	// Compute the x-domain and y-max with explicit loops rather than spreading
+	// the point arrays into Math.min/Math.max — on the 7d/30d ranges a long-lived
+	// instance accumulates tens of thousands of rows, and spreading that many
+	// arguments throws `RangeError: Maximum call stack size exceeded`.
+	let xMin = Number.POSITIVE_INFINITY;
+	let xMax = Number.NEGATIVE_INFINITY;
+	for (const r of rows) {
+		if (r.t < xMin) xMin = r.t;
+		if (r.t > xMax) xMax = r.t;
+	}
+	for (const m of markers) {
+		if (m.x < xMin) xMin = m.x;
+		if (m.x > xMax) xMax = m.x;
+	}
+	const hasX = Number.isFinite(xMin) && Number.isFinite(xMax);
+	const xDomain: [number, number] = hasX ? [xMin, xMax] : [0, 1];
+
+	let yMax = 100;
+	const yKeys = [...windowKeys, ...predictionKeys];
+	for (const r of rows) {
+		for (const k of yKeys) {
+			const v = r[k];
+			if (typeof v === "number" && v > yMax) yMax = v;
+		}
+	}
 
 	return (
 		<BaseLineChart
