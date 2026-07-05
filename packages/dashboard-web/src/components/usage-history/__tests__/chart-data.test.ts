@@ -57,7 +57,10 @@ function series(): UsageHistoryWindowSeries[] {
 
 describe("buildUsageChartData", () => {
 	it("merges actual + prediction segments into one dataset", () => {
-		const { rows, windowKeys, predictionKeys } = buildUsageChartData(series());
+		const { rows, windowKeys, predictionKeys } = buildUsageChartData(
+			series(),
+			NOW,
+		);
 		expect(windowKeys).toEqual(["five_hour", "seven_day"]);
 		expect(predictionKeys).toEqual(["five_hour__pred"]); // only the rising window
 		// distinct timestamps: 1000, 2000 (actual) + 4h (eta endpoint) = 3 rows
@@ -92,7 +95,7 @@ describe("buildUsageChartData", () => {
 				},
 			},
 		];
-		const { rows, predictionKeys } = buildUsageChartData(windows);
+		const { rows, predictionKeys } = buildUsageChartData(windows, NOW);
 		expect(predictionKeys).toEqual(["seven_day__pred"]);
 		// forecast endpoint is at the reset (10h), value = predictedAtReset (58), NOT 30h/100
 		expect(rows.map((r) => r.t)).toEqual([0, 1 * H, 10 * H]);
@@ -101,11 +104,16 @@ describe("buildUsageChartData", () => {
 });
 
 describe("resetMarkers", () => {
-	it("returns one deduped marker per distinct resetsAt", () => {
-		expect(resetMarkers(series()).map((m) => m.x)).toEqual([5 * H]);
+	it("returns a single marker at the nearest upcoming reset", () => {
+		// series() has a five_hour window resetting at 5h (+ a null-reset window).
+		expect(resetMarkers(series(), 3 * H).map((m) => m.x)).toEqual([5 * H]);
 	});
 
-	it("sorts distinct out-of-order resets ascending", () => {
+	it("returns [] when now is after every reset", () => {
+		expect(resetMarkers(series(), 6 * H)).toEqual([]);
+	});
+
+	it("picks the earliest future reset across multiple windows, skipping past ones", () => {
 		const windows: UsageHistoryWindowSeries[] = [
 			{
 				window: "seven_day",
@@ -134,8 +142,10 @@ describe("resetMarkers", () => {
 				},
 			},
 		];
-		// windows are given largest-reset-first; markers must come back ascending
-		expect(resetMarkers(windows).map((m) => m.x)).toEqual([3 * H, 10 * H]);
+		// both resets in the future (now=1h) → earliest (3h) wins
+		expect(resetMarkers(windows, 1 * H).map((m) => m.x)).toEqual([3 * H]);
+		// now past the 3h reset → the next future reset (10h) is chosen
+		expect(resetMarkers(windows, 4 * H).map((m) => m.x)).toEqual([10 * H]);
 	});
 });
 

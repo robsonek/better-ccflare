@@ -23,8 +23,10 @@ export function UsageHistoryChart({
 	height = 400,
 	emptyState = "Collecting usage data…",
 }: Props) {
-	const { rows, windowKeys, predictionKeys, markers } =
-		buildUsageChartData(windows);
+	const { rows, windowKeys, predictionKeys, markers } = buildUsageChartData(
+		windows,
+		Date.now(),
+	);
 
 	const lines = [
 		...windowKeys.map((key) => ({

@@ -17,7 +17,10 @@ const LIMIT = 100;
  * barely-positive slope can't stretch the x-domain weeks out (Fable M2).
  * Missing values are `null` (gaps).
  */
-export function buildUsageChartData(windows: UsageHistoryWindowSeries[]): {
+export function buildUsageChartData(
+	windows: UsageHistoryWindowSeries[],
+	now: number,
+): {
 	rows: ChartRow[];
 	windowKeys: string[];
 	predictionKeys: string[];
@@ -59,24 +62,34 @@ export function buildUsageChartData(windows: UsageHistoryWindowSeries[]): {
 		for (const k of allKeys) if (!(k in row)) row[k] = null;
 	}
 
-	return { rows, windowKeys, predictionKeys, markers: resetMarkers(windows) };
+	return {
+		rows,
+		windowKeys,
+		predictionKeys,
+		markers: resetMarkers(windows, now),
+	};
 }
 
-/** One deduped vertical marker per distinct window reset time. */
+/**
+ * A single vertical marker at the nearest upcoming reset — the smallest
+ * `resetsAt` strictly greater than `now` across all windows' points. Returns
+ * `[]` when no reset is still in the future. Picking the minimum future value
+ * sidesteps the sub-second resets_at jitter that defeated exact-value dedup and
+ * cluttered the chart with a line per (past + future) window reset.
+ */
 export function resetMarkers(
 	windows: UsageHistoryWindowSeries[],
+	now: number,
 ): { x: number; label: string }[] {
-	const seen = new Set<number>();
-	const out: { x: number; label: string }[] = [];
+	let next: number | null = null;
 	for (const w of windows) {
 		for (const p of w.points) {
-			if (p.resetsAt != null && !seen.has(p.resetsAt)) {
-				seen.add(p.resetsAt);
-				out.push({ x: p.resetsAt, label: "reset" });
+			if (p.resetsAt != null && p.resetsAt > now) {
+				if (next == null || p.resetsAt < next) next = p.resetsAt;
 			}
 		}
 	}
-	return out.sort((a, b) => a.x - b.x);
+	return next == null ? [] : [{ x: next, label: "reset" }];
 }
 
 /** Human-readable one-liner about a window's prediction. `now` is injected for determinism. */
