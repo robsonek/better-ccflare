@@ -2772,6 +2772,9 @@ export function createAccountForceResetRateLimitHandler(
 				const { data: usageData } = await fetchUsageData(account.access_token);
 				if (usageData) {
 					usageCache.set(account.id, usageData);
+					dbOps
+						.recordUsageSnapshot(account.id, usageData, Date.now())
+						.catch(() => {});
 					usagePollTriggered = true;
 				}
 			}

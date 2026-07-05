@@ -407,6 +407,15 @@ function startUsagePollingWithRefresh(
 							),
 						);
 				},
+				(accountId, data) => {
+					proxyContext.dbOps
+						.recordUsageSnapshot(accountId, data, Date.now())
+						.catch((err) =>
+							logger.warn(
+								`Failed to record usage snapshot for account ${accountId}: ${err}`,
+							),
+						);
+				},
 			);
 
 			// Reset retry count on success
