@@ -287,6 +287,20 @@ export async function ensureSchemaPg(adapter: BunSqlAdapter): Promise<void> {
 		)
 	`);
 
+	// Create usage_snapshots table (see SQLite migration for rationale).
+	await adapter.unsafe(`
+		CREATE TABLE IF NOT EXISTS usage_snapshots (
+			account_id TEXT NOT NULL,
+			timestamp BIGINT NOT NULL,
+			window_key TEXT NOT NULL,
+			utilization DOUBLE PRECISION NOT NULL,
+			resets_at BIGINT
+		)
+	`);
+	await adapter.unsafe(
+		`CREATE INDEX IF NOT EXISTS idx_usage_snapshots_acct_win_time ON usage_snapshots(account_id, window_key, timestamp DESC)`,
+	);
+
 	log.info("PostgreSQL schema ensured");
 }
 
