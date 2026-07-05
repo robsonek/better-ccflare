@@ -20,6 +20,7 @@ const LIMIT = 100;
 export function buildUsageChartData(
 	windows: UsageHistoryWindowSeries[],
 	now: number,
+	horizonMs: number,
 ): {
 	rows: ChartRow[];
 	windowKeys: string[];
@@ -66,25 +67,29 @@ export function buildUsageChartData(
 		rows,
 		windowKeys,
 		predictionKeys,
-		markers: resetMarkers(windows, now),
+		markers: resetMarkers(windows, now, horizonMs),
 	};
 }
 
 /**
- * A single vertical marker at the nearest upcoming reset — the smallest
- * `resetsAt` strictly greater than `now` across all windows' points. Returns
- * `[]` when no reset is still in the future. Picking the minimum future value
- * sidesteps the sub-second resets_at jitter that defeated exact-value dedup and
- * cluttered the chart with a line per (past + future) window reset.
+ * A single vertical marker at the nearest upcoming reset within the forward
+ * horizon — the smallest `resetsAt` with `now < resetsAt <= now + horizonMs`
+ * across all windows' points. Returns `[]` when no reset falls in that window.
+ * The upper bound keeps a far-future reset (e.g. a seven_day reset days out)
+ * from stretching the x-domain past the selected range. Picking the minimum
+ * future value sidesteps the sub-second resets_at jitter that defeated
+ * exact-value dedup and cluttered the chart with a line per window reset.
  */
 export function resetMarkers(
 	windows: UsageHistoryWindowSeries[],
 	now: number,
+	horizonMs: number,
 ): { x: number; label: string }[] {
+	const limit = now + horizonMs;
 	let next: number | null = null;
 	for (const w of windows) {
 		for (const p of w.points) {
-			if (p.resetsAt != null && p.resetsAt > now) {
+			if (p.resetsAt != null && p.resetsAt > now && p.resetsAt <= limit) {
 				if (next == null || p.resetsAt < next) next = p.resetsAt;
 			}
 		}

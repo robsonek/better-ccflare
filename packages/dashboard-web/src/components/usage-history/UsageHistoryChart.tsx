@@ -12,6 +12,7 @@ const WINDOW_COLORS: Record<string, string> = {
 
 interface Props {
 	windows: UsageHistoryWindowSeries[];
+	rangeMs: number;
 	loading?: boolean;
 	height?: number;
 	emptyState?: string;
@@ -19,13 +20,16 @@ interface Props {
 
 export function UsageHistoryChart({
 	windows,
+	rangeMs,
 	loading,
 	height = 400,
 	emptyState = "Collecting usage data…",
 }: Props) {
+	const now = Date.now();
 	const { rows, windowKeys, predictionKeys, markers } = buildUsageChartData(
 		windows,
-		Date.now(),
+		now,
+		rangeMs,
 	);
 
 	const lines = [
@@ -72,6 +76,14 @@ export function UsageHistoryChart({
 		if (m.x < xMin) xMin = m.x;
 		if (m.x > xMax) xMax = m.x;
 	}
+	// Cap the right edge at the selected range's forward horizon so a far-future
+	// forecast endpoint (clipped by allowDataOverflow) can't stretch a short
+	// selection out to days. Markers are already bounded by the same horizon in
+	// buildUsageChartData. Never let the cap fall below xMin (guards the empty /
+	// single-point case where xMin would otherwise exceed the capped xMax).
+	const cap = now + rangeMs;
+	if (xMax > cap) xMax = cap;
+	if (xMax < xMin) xMax = xMin;
 	const hasX = Number.isFinite(xMin) && Number.isFinite(xMax);
 	const xDomain: [number, number] = hasX ? [xMin, xMax] : [0, 1];
 

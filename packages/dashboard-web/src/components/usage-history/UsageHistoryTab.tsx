@@ -12,6 +12,7 @@ import {
 import { formatPredictionAnnotation } from "./chart-data";
 import {
 	pickDefaultAccount,
+	rangeToMs,
 	sortAccountsActiveFirst,
 	usageEmptyStateMessage,
 } from "./tab-helpers";
@@ -63,6 +64,7 @@ export function UsageHistoryTab() {
 			<Card className="p-4">
 				<UsageHistoryChart
 					windows={windows}
+					rangeMs={rangeToMs(range)}
 					loading={isLoading}
 					emptyState={usageEmptyStateMessage(selectedAccount)}
 				/>

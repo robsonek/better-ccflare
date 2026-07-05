@@ -2,9 +2,12 @@ import { describe, expect, it } from "bun:test";
 import {
 	type AccountLike,
 	pickDefaultAccount,
+	rangeToMs,
 	sortAccountsActiveFirst,
 	usageEmptyStateMessage,
 } from "../tab-helpers";
+
+const H = 60 * 60 * 1000;
 
 const acc = (
 	id: string,
@@ -76,6 +79,22 @@ describe("sortAccountsActiveFirst", () => {
 			"p1",
 			"p2",
 		]);
+	});
+});
+
+describe("rangeToMs", () => {
+	it("maps each known range to its millisecond span", () => {
+		expect(rangeToMs("1h")).toBe(H);
+		expect(rangeToMs("6h")).toBe(6 * H);
+		expect(rangeToMs("24h")).toBe(24 * H);
+		expect(rangeToMs("7d")).toBe(7 * 24 * H);
+		expect(rangeToMs("30d")).toBe(30 * 24 * H);
+	});
+
+	it("falls back to 24h for an unknown range (mirrors the endpoint)", () => {
+		expect(rangeToMs("")).toBe(24 * H);
+		expect(rangeToMs("bogus")).toBe(24 * H);
+		expect(rangeToMs("12h")).toBe(24 * H);
 	});
 });
 

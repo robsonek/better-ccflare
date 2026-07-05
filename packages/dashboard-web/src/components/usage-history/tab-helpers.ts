@@ -30,6 +30,29 @@ export function sortAccountsActiveFirst<T extends AccountLike>(
 	return [...accounts].sort((a, b) => Number(!!a.paused) - Number(!!b.paused));
 }
 
+/**
+ * Milliseconds spanned by a range string. Mirrors the endpoint's range set
+ * (getRangeConfig: 1h/6h/24h/7d/30d) and its 24h fallback for anything else,
+ * so the chart's forward horizon matches the selected range.
+ */
+export function rangeToMs(range: string): number {
+	const H = 60 * 60 * 1000;
+	switch (range) {
+		case "1h":
+			return H;
+		case "6h":
+			return 6 * H;
+		case "24h":
+			return 24 * H;
+		case "7d":
+			return 7 * 24 * H;
+		case "30d":
+			return 30 * 24 * H;
+		default:
+			return 24 * H;
+	}
+}
+
 /** Empty-state message for the chart, based on the selected account. */
 export function usageEmptyStateMessage(account?: AccountLike): string {
 	if (!account) return "Select an account to view its usage history.";
