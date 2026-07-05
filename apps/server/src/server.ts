@@ -244,6 +244,9 @@ async function runStartupMaintenance(
 		log.info(
 			`Startup cleanup removed ${removedRequests} requests and ${removedPayloads} payloads (payload=${payloadDays}d, requests=${requestDays}d)`,
 		);
+		await dbOps.pruneUsageSnapshots(
+			Date.now() - config.getUsageHistoryRetentionDays() * TIME_CONSTANTS.DAY,
+		);
 	} catch (err) {
 		log.error(`Startup cleanup error: ${err}`);
 	}
@@ -796,6 +799,13 @@ export default async function startServer(options?: {
 					.catch((err) => {
 						log.error(`Incremental vacuum error: ${err}`);
 					});
+			}
+			const usageHistoryDays = config.getUsageHistoryRetentionDays();
+			const removedSnapshots = await dbOps.pruneUsageSnapshots(
+				Date.now() - usageHistoryDays * TIME_CONSTANTS.DAY,
+			);
+			if (removedSnapshots > 0) {
+				log.info(`Pruned ${removedSnapshots} old usage snapshots`);
 			}
 		} catch (err) {
 			log.error(`Periodic data retention cleanup error: ${err}`);
