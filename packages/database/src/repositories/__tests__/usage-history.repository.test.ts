@@ -148,7 +148,7 @@ describe("UsageHistoryRepository", () => {
 
 describe("DatabaseOperations usage-history facade", () => {
 	it("round-trips a snapshot through recordUsageSnapshot / getUsageHistory", async () => {
-		const dbOps = new DatabaseOperations(":memory:");
+		const dbOps = new DatabaseOperations(":memory:", { walMode: false });
 		try {
 			await dbOps.recordUsageSnapshot(
 				"acc1",
@@ -167,7 +167,7 @@ describe("DatabaseOperations usage-history facade", () => {
 	});
 
 	it("getUsageHistory forwards windowKey/since/until to getSeries", async () => {
-		const dbOps = new DatabaseOperations(":memory:");
+		const dbOps = new DatabaseOperations(":memory:", { walMode: false });
 		try {
 			await dbOps.recordUsageSnapshot(
 				"acc1",
@@ -198,7 +198,7 @@ describe("DatabaseOperations usage-history facade", () => {
 	});
 
 	it("pruneUsageSnapshots deletes rows older than the cutoff and returns the count", async () => {
-		const dbOps = new DatabaseOperations(":memory:");
+		const dbOps = new DatabaseOperations(":memory:", { walMode: false });
 		try {
 			await dbOps.recordUsageSnapshot(
 				"acc1",
