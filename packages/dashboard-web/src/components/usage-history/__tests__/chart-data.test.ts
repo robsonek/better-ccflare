@@ -1,0 +1,239 @@
+import { describe, expect, it } from "bun:test";
+import type { UsageHistoryWindowSeries } from "@better-ccflare/types";
+import {
+	buildUsageChartData,
+	formatPredictionAnnotation,
+	resetMarkers,
+} from "../chart-data";
+
+const H = 60 * 60 * 1000;
+const NOW = 3 * H;
+
+/** Build a single-window series with an inline prediction, for annotation tests. */
+function annSeries(
+	window: string,
+	prediction: UsageHistoryWindowSeries["prediction"],
+): UsageHistoryWindowSeries {
+	return {
+		window,
+		points: [{ t: 1000, utilization: 50, resetsAt: prediction.resetsAtMs }],
+		prediction,
+	};
+}
+
+function series(): UsageHistoryWindowSeries[] {
+	return [
+		{
+			window: "five_hour",
+			points: [
+				{ t: 1000, utilization: 10, resetsAt: 5 * H },
+				{ t: 2000, utilization: 20, resetsAt: 5 * H },
+			],
+			prediction: {
+				slopePerHour: 10,
+				etaExhaustMs: 4 * H,
+				predictedAtReset: 100,
+				resetsAtMs: 5 * H,
+				willExhaustBeforeReset: true,
+				state: "rising",
+				lowConfidence: false,
+			},
+		},
+		{
+			window: "seven_day",
+			points: [{ t: 2000, utilization: 3, resetsAt: null }],
+			prediction: {
+				slopePerHour: 0,
+				etaExhaustMs: null,
+				predictedAtReset: null,
+				resetsAtMs: null,
+				willExhaustBeforeReset: false,
+				state: "stable",
+				lowConfidence: false,
+			},
+		},
+	];
+}
+
+describe("buildUsageChartData", () => {
+	it("merges actual + prediction segments into one dataset", () => {
+		const { rows, windowKeys, predictionKeys } = buildUsageChartData(series());
+		expect(windowKeys).toEqual(["five_hour", "seven_day"]);
+		expect(predictionKeys).toEqual(["five_hour__pred"]); // only the rising window
+		// distinct timestamps: 1000, 2000 (actual) + 4h (eta endpoint) = 3 rows
+		expect(rows.map((r) => r.t)).toEqual([1000, 2000, 4 * H]);
+		const t2 = rows.find((r) => r.t === 2000)!;
+		expect(t2.five_hour).toBe(20);
+		expect(t2.seven_day).toBe(3);
+		expect(t2.five_hour__pred).toBe(20); // prediction anchored at last actual
+		const eta = rows.find((r) => r.t === 4 * H)!;
+		expect(eta.five_hour__pred).toBe(100); // dashed line reaches the limit
+		expect(eta.five_hour).toBeNull(); // no actual point there
+		const t1 = rows.find((r) => r.t === 1000)!;
+		expect(t1.seven_day).toBeNull(); // gap
+	});
+
+	it("caps the forecast at the reset when the ETA is beyond it", () => {
+		const windows = [
+			{
+				window: "seven_day",
+				points: [
+					{ t: 0, utilization: 40, resetsAt: 10 * H },
+					{ t: 1 * H, utilization: 42, resetsAt: 10 * H },
+				],
+				prediction: {
+					slopePerHour: 2,
+					etaExhaustMs: 30 * H, // ETA far beyond the 10h reset
+					predictedAtReset: 58,
+					resetsAtMs: 10 * H,
+					willExhaustBeforeReset: false,
+					state: "rising" as const,
+					lowConfidence: false,
+				},
+			},
+		];
+		const { rows, predictionKeys } = buildUsageChartData(windows);
+		expect(predictionKeys).toEqual(["seven_day__pred"]);
+		// forecast endpoint is at the reset (10h), value = predictedAtReset (58), NOT 30h/100
+		expect(rows.map((r) => r.t)).toEqual([0, 1 * H, 10 * H]);
+		expect(rows.find((r) => r.t === 10 * H)?.seven_day__pred).toBe(58);
+	});
+});
+
+describe("resetMarkers", () => {
+	it("returns one deduped marker per distinct resetsAt", () => {
+		expect(resetMarkers(series()).map((m) => m.x)).toEqual([5 * H]);
+	});
+
+	it("sorts distinct out-of-order resets ascending", () => {
+		const windows: UsageHistoryWindowSeries[] = [
+			{
+				window: "seven_day",
+				points: [{ t: 0, utilization: 40, resetsAt: 10 * H }],
+				prediction: {
+					slopePerHour: 0,
+					etaExhaustMs: null,
+					predictedAtReset: null,
+					resetsAtMs: 10 * H,
+					willExhaustBeforeReset: false,
+					state: "stable",
+					lowConfidence: false,
+				},
+			},
+			{
+				window: "five_hour",
+				points: [{ t: 0, utilization: 20, resetsAt: 3 * H }],
+				prediction: {
+					slopePerHour: 0,
+					etaExhaustMs: null,
+					predictedAtReset: null,
+					resetsAtMs: 3 * H,
+					willExhaustBeforeReset: false,
+					state: "stable",
+					lowConfidence: false,
+				},
+			},
+		];
+		// windows are given largest-reset-first; markers must come back ascending
+		expect(resetMarkers(windows).map((m) => m.x)).toEqual([3 * H, 10 * H]);
+	});
+});
+
+describe("formatPredictionAnnotation", () => {
+	it("summarizes a rising window that will exhaust before reset", () => {
+		const out = formatPredictionAnnotation(series()[0], 3 * H);
+		expect(out).toContain("five_hour");
+		expect(out.toLowerCase()).toContain("limit");
+	});
+	it("says stable for a stable window", () => {
+		expect(formatPredictionAnnotation(series()[1], 0).toLowerCase()).toContain(
+			"stable",
+		);
+	});
+
+	// Load-bearing guard: a rising window with NO known reset must never claim
+	// "safe until reset" (Fable M6). Pins the negative direction.
+	it("never claims safe for a rising window with no known reset", () => {
+		const out = formatPredictionAnnotation(
+			annSeries("five_hour", {
+				slopePerHour: 5,
+				etaExhaustMs: null,
+				predictedAtReset: null,
+				resetsAtMs: null,
+				willExhaustBeforeReset: false,
+				state: "rising",
+				lowConfidence: false,
+			}),
+			NOW,
+		);
+		expect(out.toLowerCase()).not.toContain("safe");
+		expect(out).toContain("five_hour");
+		expect(out.toLowerCase()).toContain("rising");
+	});
+
+	it("says collecting for insufficient_data", () => {
+		const out = formatPredictionAnnotation(
+			annSeries("seven_day", {
+				slopePerHour: 0,
+				etaExhaustMs: null,
+				predictedAtReset: null,
+				resetsAtMs: null,
+				willExhaustBeforeReset: false,
+				state: "insufficient_data",
+				lowConfidence: false,
+			}),
+			NOW,
+		);
+		expect(out.toLowerCase()).toContain("collecting");
+	});
+
+	it("says at limit for an exhausted window", () => {
+		const out = formatPredictionAnnotation(
+			annSeries("five_hour", {
+				slopePerHour: 20,
+				etaExhaustMs: NOW,
+				predictedAtReset: 100,
+				resetsAtMs: 5 * H,
+				willExhaustBeforeReset: true,
+				state: "exhausted",
+				lowConfidence: false,
+			}),
+			NOW,
+		);
+		expect(out.toLowerCase()).toContain("limit");
+	});
+
+	it("flags low confidence for a rising low-confidence window", () => {
+		const out = formatPredictionAnnotation(
+			annSeries("five_hour", {
+				slopePerHour: 8,
+				etaExhaustMs: null,
+				predictedAtReset: null,
+				resetsAtMs: 5 * H,
+				willExhaustBeforeReset: false,
+				state: "rising",
+				lowConfidence: true,
+			}),
+			NOW,
+		);
+		expect(out.toLowerCase()).toContain("low confidence");
+	});
+
+	// Positive counterpart to the guard: a rising window WITH a known reset that
+	// won't exhaust before it should say "safe". Together these pin both directions.
+	it("says safe until reset for a rising window with a known reset", () => {
+		const out = formatPredictionAnnotation(
+			annSeries("five_hour", {
+				slopePerHour: 6,
+				etaExhaustMs: 8 * H,
+				predictedAtReset: 70,
+				resetsAtMs: 5 * H,
+				willExhaustBeforeReset: false,
+				state: "rising",
+				lowConfidence: false,
+			}),
+			NOW,
+		);
+		expect(out.toLowerCase()).toContain("safe");
+	});
+});
