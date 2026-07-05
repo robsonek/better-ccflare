@@ -62,6 +62,35 @@ describe("computeUsagePrediction", () => {
 		expect(p.resetsAtMs).toBe(reset2);
 	});
 
+	it("tolerates sub-second resets_at jitter within one window (no false segmentation)", () => {
+		// Real Anthropic data: every poll reports the SAME reset instant but the
+		// stored epoch-ms jitters by ~±1s. Exact-inequality segmentation would cut
+		// at every pair → segment length 1 → bogus "insufficient_data". A rising
+		// window with ample data must still read as "rising" across the whole span.
+		const base = 20 * H;
+		const jitter = [120, -300, 80, -50, 200]; // ms, all within ±1s
+		const points: PredictionPoint[] = [0, 1, 2, 3, 4].map((h) => ({
+			t: h * H,
+			utilization: 20 + 10 * h, // 20,30,40,50,60 → slope 10/h
+			resetsAt: base + jitter[h],
+		}));
+		const p = computeUsagePrediction(points);
+		expect(p.state).toBe("rising");
+		expect(Math.round(p.slopePerHour)).toBe(10); // whole segment, not a lone point
+	});
+
+	it("stays stable across resets_at jitter for a flat window", () => {
+		const base = 20 * H;
+		const jitter = [120, -300, 80, -50, 200];
+		const points: PredictionPoint[] = [0, 1, 2, 3, 4].map((h) => ({
+			t: h * H,
+			utilization: 51, // flat
+			resetsAt: base + jitter[h],
+		}));
+		const p = computeUsagePrediction(points);
+		expect(p.state).toBe("stable");
+	});
+
 	it("reports exhausted when the latest sample is at/over 100", () => {
 		const reset = 20 * H;
 		const points: PredictionPoint[] = [

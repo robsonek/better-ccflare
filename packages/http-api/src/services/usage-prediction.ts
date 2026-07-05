@@ -5,6 +5,11 @@ const HOUR_MS = 60 * 60 * 1000;
 const MIN_POINTS = 3;
 const MIN_SPAN_MS = 5 * 60 * 1000; // below ~5 min the trend is not trustworthy
 const RESET_DROP_THRESHOLD = 5; // pp drop that marks a reset/refund (not jitter)
+// Real Anthropic polls report the SAME reset instant but the stored epoch-ms
+// jitters by ~±1s. Treat a resets_at change as a new-window boundary only when it
+// exceeds this tolerance — far above the ~1s jitter, far below the smallest real
+// reset shift (5h). Without this, jitter cuts a segment at every pair.
+const RESET_JITTER_TOLERANCE_MS = 60_000;
 const LIMIT = 100; // utilization is 0–100
 
 const clamp = (v: number, lo: number, hi: number) =>
@@ -59,7 +64,19 @@ export function computeUsagePrediction(
 	for (let i = 1; i < pts.length; i++) {
 		const prev = pts[i - 1];
 		const cur = pts[i];
-		const resetChanged = (prev.resetsAt ?? null) !== (cur.resetsAt ?? null);
+		// A resets_at change marks a new window only when it moves by MORE than the
+		// jitter tolerance. A null↔value transition is always a boundary; both-null
+		// is never one.
+		const prevReset = prev.resetsAt ?? null;
+		const curReset = cur.resetsAt ?? null;
+		let resetChanged: boolean;
+		if (prevReset == null && curReset == null) {
+			resetChanged = false;
+		} else if (prevReset == null || curReset == null) {
+			resetChanged = true;
+		} else {
+			resetChanged = Math.abs(curReset - prevReset) > RESET_JITTER_TOLERANCE_MS;
+		}
 		const dropped = cur.utilization < prev.utilization - RESET_DROP_THRESHOLD;
 		if (resetChanged || dropped) segStart = i;
 	}
