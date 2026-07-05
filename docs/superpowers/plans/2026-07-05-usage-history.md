@@ -43,7 +43,7 @@
 - `packages/database/src/migrations.ts` / `migrations-pg.ts` — `usage_snapshots` table + index.
 - `packages/database/src/database-operations.ts` — repo field + facade methods.
 - `packages/providers/src/usage-fetcher.ts` — `onSnapshot` param + `snapshotCallbacks` map + fire in Anthropic branch.
-- `apps/server/src/server.ts` — pass `onSnapshot` at the 4 `startPolling` sites; call `pruneUsageSnapshots` in cleanup + startup maintenance.
+- `apps/server/src/server.ts` — pass `onSnapshot` at the **single Anthropic `startPolling` site (line 366)**; call `pruneUsageSnapshots` in cleanup + startup maintenance.
 - `packages/http-api/src/router.ts` — register `GET:/api/usage-history`.
 - `packages/dashboard-web/src/api.ts` — `getUsageHistory(account, range)`.
 - `packages/dashboard-web/src/lib/query-keys.ts` — `usageHistory` key.
@@ -957,17 +957,28 @@ import { describe, expect, it } from "bun:test";
 import type { UsageSnapshotRow } from "@better-ccflare/types";
 import { createUsageHistoryHandler } from "../usage-history";
 
+// Captures the opts passed to getUsageHistory so we can assert filter forwarding.
 function makeContext(rows: UsageSnapshotRow[]) {
-	return {
+	const calls: Array<{ accountId: string; windowKey?: string; since?: number }> = [];
+	const context = {
 		dbOps: {
-			getUsageHistory: async () => rows,
+			getUsageHistory: async (opts: {
+				accountId: string;
+				windowKey?: string;
+				since?: number;
+			}) => {
+				calls.push(opts);
+				return rows;
+			},
 		},
 	} as unknown as import("../../types").APIContext;
+	return { context, calls };
 }
 
 describe("createUsageHistoryHandler", () => {
 	it("400s when account is missing", async () => {
-		const handler = createUsageHistoryHandler(makeContext([]));
+		const { context } = makeContext([]);
+		const handler = createUsageHistoryHandler(context);
 		const res = await handler(new URLSearchParams(""));
 		expect(res.status).toBe(400);
 	});
@@ -981,11 +992,13 @@ describe("createUsageHistoryHandler", () => {
 			utilization: 10 * h + 10,
 			resetsAt: 20 * H,
 		}));
-		const handler = createUsageHistoryHandler(makeContext(rows));
+		const { context } = makeContext(rows);
+		const handler = createUsageHistoryHandler(context);
 		const res = await handler(new URLSearchParams("account=acc1&range=7d"));
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as {
 			accountId: string;
+			range: string;
 			windows: { window: string; points: unknown[]; prediction: { state: string } }[];
 		};
 		expect(body.accountId).toBe("acc1");
@@ -993,6 +1006,30 @@ describe("createUsageHistoryHandler", () => {
 		expect(body.windows[0].window).toBe("five_hour");
 		expect(body.windows[0].points).toHaveLength(4);
 		expect(body.windows[0].prediction.state).toBe("rising");
+	});
+
+	it("echoes the normalized range for an unknown value", async () => {
+		const { context } = makeContext([]);
+		const handler = createUsageHistoryHandler(context);
+		const res = await handler(new URLSearchParams("account=acc1&range=bogus"));
+		const body = (await res.json()) as { range: string };
+		expect(body.range).toBe("24h"); // unknown → getRangeConfig falls back to 24h
+	});
+
+	it("forwards the window filter to getUsageHistory", async () => {
+		const { context, calls } = makeContext([]);
+		const handler = createUsageHistoryHandler(context);
+		await handler(new URLSearchParams("account=acc1&window=seven_day_opus"));
+		expect(calls[0].accountId).toBe("acc1");
+		expect(calls[0].windowKey).toBe("seven_day_opus");
+	});
+
+	it("returns an empty windows array when there are no rows", async () => {
+		const { context } = makeContext([]);
+		const handler = createUsageHistoryHandler(context);
+		const res = await handler(new URLSearchParams("account=acc1"));
+		const body = (await res.json()) as { windows: unknown[] };
+		expect(body.windows).toEqual([]);
 	});
 });
 ```
@@ -1097,7 +1134,7 @@ import { createUsageHistoryHandler } from "./handlers/usage-history";
 - [ ] **Step 5: Run test + typecheck to verify pass**
 
 Run: `bun test packages/http-api/src/handlers/__tests__/usage-history.test.ts`
-Expected: PASS (2 tests).
+Expected: PASS (5 tests).
 Run: `cd packages/http-api && bunx tsc --noEmit`
 Expected: no errors.
 
@@ -1185,7 +1222,7 @@ git commit -m "feat(http-api): add GET /api/usage-history endpoint"
   1. `packages/proxy/src/auto-refresh-scheduler.ts` — right after the `if (usageData) { log.info(...) }` block (~line 617), where `usageData` is currently only logged:
 
 ```typescript
-						proxyContext.dbOps
+						this.proxyContext.dbOps
 							.recordUsageSnapshot(accountRow.id, usageData, Date.now())
 							.catch((err) =>
 								log.warn(
