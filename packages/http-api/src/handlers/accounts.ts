@@ -2774,7 +2774,11 @@ export function createAccountForceResetRateLimitHandler(
 					usageCache.set(account.id, usageData);
 					dbOps
 						.recordUsageSnapshot(account.id, usageData, Date.now())
-						.catch(() => {});
+						.catch((err) =>
+							log.warn(
+								`Failed to record usage snapshot for ${account.name}: ${err}`,
+							),
+						);
 					usagePollTriggered = true;
 				}
 			}
