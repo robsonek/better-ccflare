@@ -10,6 +10,11 @@ import {
 	SelectValue,
 } from "../ui/select";
 import { formatPredictionAnnotation } from "./chart-data";
+import {
+	pickDefaultAccount,
+	sortAccountsActiveFirst,
+	usageEmptyStateMessage,
+} from "./tab-helpers";
 import { UsageHistoryChart } from "./UsageHistoryChart";
 
 // Match the ranges the endpoint accepts (getRangeConfig: 1h/6h/24h/7d/30d).
@@ -20,7 +25,8 @@ export function UsageHistoryTab() {
 	const [accountId, setAccountId] = useState<string>("");
 	const [range, setRange] = useState<string>("24h");
 
-	const selected = accountId || accounts?.[0]?.id || "";
+	const selected = accountId || pickDefaultAccount(accounts) || "";
+	const selectedAccount = accounts?.find((a) => a.id === selected);
 	const { data, isLoading } = useUsageHistory(selected, range);
 	const windows = data?.windows ?? [];
 
@@ -32,9 +38,10 @@ export function UsageHistoryTab() {
 						<SelectValue placeholder="Select account" />
 					</SelectTrigger>
 					<SelectContent>
-						{(accounts ?? []).map((a) => (
+						{sortAccountsActiveFirst(accounts ?? []).map((a) => (
 							<SelectItem key={a.id} value={a.id}>
 								{a.name}
+								{a.paused ? " (paused)" : ""}
 							</SelectItem>
 						))}
 					</SelectContent>
@@ -54,7 +61,11 @@ export function UsageHistoryTab() {
 			</div>
 
 			<Card className="p-4">
-				<UsageHistoryChart windows={windows} loading={isLoading} />
+				<UsageHistoryChart
+					windows={windows}
+					loading={isLoading}
+					emptyState={usageEmptyStateMessage(selectedAccount)}
+				/>
 			</Card>
 
 			{windows.length > 0 && (

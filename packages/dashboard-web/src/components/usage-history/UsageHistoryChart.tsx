@@ -14,9 +14,15 @@ interface Props {
 	windows: UsageHistoryWindowSeries[];
 	loading?: boolean;
 	height?: number;
+	emptyState?: string;
 }
 
-export function UsageHistoryChart({ windows, loading, height = 400 }: Props) {
+export function UsageHistoryChart({
+	windows,
+	loading,
+	height = 400,
+	emptyState = "Collecting usage data…",
+}: Props) {
 	const { rows, windowKeys, predictionKeys, markers } =
 		buildUsageChartData(windows);
 
@@ -88,7 +94,7 @@ export function UsageHistoryChart({ windows, loading, height = 400 }: Props) {
 			height={height}
 			showLegend
 			yAxisDomain={[0, yMax]}
-			emptyState="Collecting usage data…"
+			emptyState={emptyState}
 			xAxisTickFormatter={(v) => new Date(Number(v)).toLocaleString()}
 			tooltipLabelFormatter={(v) => new Date(Number(v)).toLocaleString()}
 			tooltipFormatter={(value, name) => [`${value}%`, String(name)]}
