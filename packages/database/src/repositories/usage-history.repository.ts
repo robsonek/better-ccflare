@@ -99,7 +99,9 @@ export class UsageHistoryRepository extends BaseRepository<UsageSnapshotRow> {
 }
 
 /** Convenience: map snapshot rows to prediction/chart points. */
-export function toPredictionPoints(rows: UsageSnapshotRow[]): PredictionPoint[] {
+export function toPredictionPoints(
+	rows: UsageSnapshotRow[],
+): PredictionPoint[] {
 	return rows.map((r) => ({
 		t: r.timestamp,
 		utilization: r.utilization,
